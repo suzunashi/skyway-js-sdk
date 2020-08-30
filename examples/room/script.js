@@ -1,5 +1,48 @@
 const Peer = window.Peer;
 
+
+async function get2chStream() {
+  await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  const device2ch = devices.find(device => device.kind === "audioinput" && device.label === "Soundflower (2ch)");
+
+  if (device2ch === undefined) {
+    alert("2chデバイスが見つかりませんでした");
+    return;
+  }
+  const stream = await navigator.mediaDevices.getUserMedia(
+    {
+      video: true,
+      audio: {
+        deviceId: device2ch.deviceId,
+        channelCount: { ideal: 2, min: 1 },
+        echoCancellation: false,
+        googEchoCancellation: false
+      }
+    });
+
+  // AudioContextを作成
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  const audioCtx = new AudioContext();
+  const source = audioCtx.createMediaStreamSource(stream);
+  const splitter = audioCtx.createChannelSplitter(2);
+  source.connect(splitter);
+
+  const dest1 = audioCtx.createMediaStreamDestination();
+  const dest2 = audioCtx.createMediaStreamDestination();
+
+  splitter.connect(dest1, 1);
+  splitter.connect(dest2, 0);
+
+  const newStream = new MediaStream();
+  newStream.addTrack(stream.getVideoTracks()[0]);
+  newStream.addTrack(dest1.stream.getAudioTracks()[0]);
+  newStream.addTrack(dest2.stream.getAudioTracks()[0]);
+
+  return newStream;
+}
+
+
 (async function main() {
   const localVideo = document.getElementById('js-local-stream');
   const joinTrigger = document.getElementById('js-join-trigger');
@@ -26,12 +69,14 @@ const Peer = window.Peer;
     () => (roomMode.textContent = getRoomModeByHash())
   );
 
-  const localStream = await navigator.mediaDevices
-    .getUserMedia({
-      audio: true,
-      video: true,
-    })
-    .catch(console.error);
+  // const localStream = await navigator.mediaDevices
+  //   .getUserMedia({
+  //     audio: true,
+  //     video: true,
+  //   })
+  //   .catch(console.error);
+  const localStream = await get2chStream();
+  console.log(localStream.getTracks());
 
   // Render local stream
   localVideo.muted = true;
@@ -68,8 +113,16 @@ const Peer = window.Peer;
     // Render remote stream for new peer join in the room
     room.on('stream', async stream => {
       const newVideo = document.createElement('video');
+      console.log(stream.getAudioTracks());
+      stream.getAudioTracks().forEach((track, i) => {
+        const newStream = new MediaStream();
+        const audio = document.getElementById(`audio-${i + 1}`);
+        newStream.addTrack(track);
+        audio.srcObject = newStream;
+      })
       newVideo.srcObject = stream;
       newVideo.playsInline = true;
+      newVideo.controls = true;
       // mark peerId to find it later at peerLeave event
       newVideo.setAttribute('data-peer-id', stream.peerId);
       remoteVideos.append(newVideo);
